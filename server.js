@@ -19,19 +19,14 @@ app.post('/clean-pdf-json', async (req, res) => {
     });
     const fullData = response.data;
     
-    // Handle different JSON structures from PDF.co
-    const pages = fullData.pages || fullData.document?.pages || [];
+    // Get pages array - it's called "page" not "pages"
+    const pages = fullData.document?.page || [];
     
-    console.log('Data structure:', {
-      hasPages: pages.length > 0,
-      pagesLength: pages.length,
-      topLevelKeys: Object.keys(fullData)
-    });
+    console.log(`Found ${pages.length} pages`);
     
-    if (pages.length === 0) {
+    if (!Array.isArray(pages) || pages.length === 0) {
       return res.json({
         error: 'No pages found',
-        dataStructure: Object.keys(fullData),
         pages: [],
         originalSize: 0,
         cleanedSize: 0,
@@ -73,7 +68,9 @@ app.post('/clean-pdf-json', async (req, res) => {
     console.log(`Processing ${pages.length} pages...`);
     
     for (const page of pages) {
-      originalSize += JSON.stringify(page).length;
+      const pageStr = JSON.stringify(page);
+      originalSize += pageStr.length;
+      
       const cleanedPage = cleanEmptyText(page);
       const cleanedStr = JSON.stringify(cleanedPage);
       
@@ -83,7 +80,7 @@ app.post('/clean-pdf-json', async (req, res) => {
       }
     }
     
-    console.log(`Cleaned ${cleanedPages.length} pages`);
+    console.log(`Cleaned ${cleanedPages.length} pages, saved ${originalSize - cleanedSize} chars`);
     
     res.json({
       pages: cleanedPages,
@@ -102,6 +99,9 @@ app.post('/clean-pdf-json', async (req, res) => {
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
