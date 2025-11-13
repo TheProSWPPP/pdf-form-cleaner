@@ -6,10 +6,11 @@ app.use(express.json());
 
 app.post('/clean-pdf-json', async (req, res) => {
   try {
-    const { url } = req.body;
+    const { url, apiKey } = req.body;
     
-    // Fetch the JSON file
-    const response = await axios.get(url);
+    // Fetch the JSON file with PDF.co API key if provided
+    const headers = apiKey ? { 'x-api-key': apiKey } : {};
+    const response = await axios.get(url, { headers });
     const fullData = response.data;
     
     function cleanEmptyText(obj) {
@@ -72,4 +73,3 @@ app.get('/health', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
