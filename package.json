@@ -1,0 +1,16 @@
+{
+  "name": "pdf-json-cleaner",
+  "version": "1.0.0",
+  "description": "Microservice to clean PDF.co JSON output",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
