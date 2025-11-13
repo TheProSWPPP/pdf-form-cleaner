@@ -2,16 +2,42 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: '500mb' }));
 
 app.post('/clean-pdf-json', async (req, res) => {
   try {
     const { url, apiKey } = req.body;
     
-    // Fetch the JSON file with PDF.co API key if provided
+    console.log('Fetching URL:', url);
+    
+    // Fetch the JSON file
     const headers = apiKey ? { 'x-api-key': apiKey } : {};
-    const response = await axios.get(url, { headers });
+    const response = await axios.get(url, { 
+      headers,
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity
+    });
     const fullData = response.data;
+    
+    console.log('Data structure:', {
+      hasPages: !!fullData.pages,
+      pagesLength: fullData.pages?.length,
+      topLevelKeys: Object.keys(fullData),
+      firstPageKeys: fullData.pages?.[0] ? Object.keys(fullData.pages[0]) : 'no pages'
+    });
+    
+    // Check if pages exist
+    if (!fullData.pages || fullData.pages.length === 0) {
+      return res.json({
+        error: 'No pages found',
+        dataStructure: Object.keys(fullData),
+        pages: [],
+        originalSize: 0,
+        cleanedSize: 0,
+        savedCharacters: 0,
+        estimatedTokensSaved: 0
+      });
+    }
     
     function cleanEmptyText(obj) {
       if (Array.isArray(obj)) {
@@ -43,7 +69,9 @@ app.post('/clean-pdf-json', async (req, res) => {
     let originalSize = 0;
     let cleanedSize = 0;
     
-    for (const page of fullData.pages || []) {
+    console.log(`Processing ${fullData.pages.length} pages...`);
+    
+    for (const page of fullData.pages) {
       originalSize += JSON.stringify(page).length;
       const cleanedPage = cleanEmptyText(page);
       const cleanedStr = JSON.stringify(cleanedPage);
@@ -54,6 +82,8 @@ app.post('/clean-pdf-json', async (req, res) => {
       }
     }
     
+    console.log(`Cleaned ${cleanedPages.length} pages`);
+    
     res.json({
       pages: cleanedPages,
       originalSize,
@@ -63,7 +93,8 @@ app.post('/clean-pdf-json', async (req, res) => {
     });
     
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error:', error.message);
+    res.status(500).json({ error: error.message, stack: error.stack });
   }
 });
 
