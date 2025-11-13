@@ -19,15 +19,16 @@ app.post('/clean-pdf-json', async (req, res) => {
     });
     const fullData = response.data;
     
+    // Handle different JSON structures from PDF.co
+    const pages = fullData.pages || fullData.document?.pages || [];
+    
     console.log('Data structure:', {
-      hasPages: !!fullData.pages,
-      pagesLength: fullData.pages?.length,
-      topLevelKeys: Object.keys(fullData),
-      firstPageKeys: fullData.pages?.[0] ? Object.keys(fullData.pages[0]) : 'no pages'
+      hasPages: pages.length > 0,
+      pagesLength: pages.length,
+      topLevelKeys: Object.keys(fullData)
     });
     
-    // Check if pages exist
-    if (!fullData.pages || fullData.pages.length === 0) {
+    if (pages.length === 0) {
       return res.json({
         error: 'No pages found',
         dataStructure: Object.keys(fullData),
@@ -69,9 +70,9 @@ app.post('/clean-pdf-json', async (req, res) => {
     let originalSize = 0;
     let cleanedSize = 0;
     
-    console.log(`Processing ${fullData.pages.length} pages...`);
+    console.log(`Processing ${pages.length} pages...`);
     
-    for (const page of fullData.pages) {
+    for (const page of pages) {
       originalSize += JSON.stringify(page).length;
       const cleanedPage = cleanEmptyText(page);
       const cleanedStr = JSON.stringify(cleanedPage);
