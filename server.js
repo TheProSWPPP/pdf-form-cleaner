@@ -32,15 +32,15 @@ app.post('/clean-pdf-json', async (req, res) => {
     const headers = apiKey ? { 'x-api-key': apiKey } : {};
     const response = await axios.get(url, { 
       headers,
-      responseType: 'json', // Ensure axios parses the JSON automatically.
-      maxContentLength: Infinity, // Allow for very large responses.
+      responseType: 'json',
+      maxContentLength: Infinity,
       maxBodyLength: Infinity
     });
 
     const fullData = response.data;
     const originalSize = JSON.stringify(fullData).length;
     
-    // Navigate to the array of pages in the nested structure. Adjust if your source JSON differs.
+    // Navigate to the array of pages in the nested structure.
     const pages = fullData.document?.page || [];
     
     console.log(`Found ${pages.length} pages to process.`);
@@ -58,9 +58,7 @@ app.post('/clean-pdf-json', async (req, res) => {
     
     const cleanedPagesContent = [];
     
-    // Iterate through each page to extract and structure text elements.
     for (const page of pages) {
-      // MODIFICATION: The array will now hold objects {text, bbox} instead of just strings.
       const pageElements = [];
       const rows = page.row || [];
 
@@ -70,22 +68,22 @@ app.post('/clean-pdf-json', async (req, res) => {
           if (Array.isArray(columns)) {
             for (const column of columns) {
               const textObj = column.text;
+              
+              // Ensure textObj is an object and contains the '#text' property. This also filters out empty text nodes.
               if (textObj && typeof textObj === 'object' && textObj['#text']) {
                 const textContent = String(textObj['#text']).trim();
                 
-                // MODIFICATION: Check for and extract coordinates.
-                // The attribute keys ('@_x', '@_y', etc.) are common in XML-to-JSON conversions.
-                // **IMPORTANT**: Adjust these keys if your specific JSON uses a different format (e.g., "x", "y", "bbox").
-                const x = parseFloat(column['@_x']);
-                const y = parseFloat(column['@_y']);
-                const w = parseFloat(column['@_w']);
-                const h = parseFloat(column['@_h']);
+                // CORRECTED: The coordinates are on the `textObj`, not the `column`.
+                // The attribute names are also corrected from `@_x` to `@x`, etc.
+                const x = parseFloat(textObj['@x']);
+                const y = parseFloat(textObj['@y']);
+                const w = parseFloat(textObj['@width']);
+                const h = parseFloat(textObj['@height']);
 
-                // Only add the element if we have valid text AND valid numerical coordinates.
                 if (textContent && !isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
                   pageElements.push({
                     text: textContent,
-                    bbox: [x, y, x + w, y + h] // Storing as a standard [x1, y1, x2, y2] bounding box.
+                    bbox: [x, y, x + w, y + h] // Storing as [x1, y1, x2, y2]
                   });
                 }
               }
@@ -94,7 +92,6 @@ app.post('/clean-pdf-json', async (req, res) => {
         }
       }
       
-      // MODIFICATION: Add the array of objects for the entire page.
       if (pageElements.length > 0) {
         cleanedPagesContent.push(pageElements);
       }
