@@ -2,32 +2,39 @@ const express = require('express');
 const axios = require('axios');
 const app = express();
 
-/**
- * This server provides an endpoint to process a raw JSON output from a PDF extraction service.
- * The primary goal is to clean and restructure the data for consumption by an AI model.
- * It transforms the deeply nested JSON into a simplified structure that includes text content
- * along with its spatial bounding box coordinates, which is essential for layout-aware analysis.
- */
-
-// Increase the payload size limit to handle very large JSON files from complex PDFs.
 app.use(express.json({ limit: '500mb' }));
 
-/**
- * @route POST /clean-pdf-json
- * @desc Fetches a raw PDF JSON from a URL, cleans it, and returns a structured format with text and coordinates.
- * @body {string} url - The URL of the raw JSON file to process.
- * @body {string} [apiKey] - An optional API key to include in the request headers.
- */
+// Helper function to flatten all text elements on a page into a single string.
+const getPageAsText = (page) => {
+  const pageTexts = [];
+  const rows = page.row || [];
+  if (Array.isArray(rows)) {
+    for (const row of rows) {
+      const columns = row.column || [];
+      if (Array.isArray(columns)) {
+        for (const column of columns) {
+          const textObj = column.text;
+          if (textObj && typeof textObj === 'object' && textObj['#text']) {
+            const textContent = String(textObj['#text']).trim();
+            if (textContent) {
+              pageTexts.push(textContent);
+            }
+          }
+        }
+      }
+    }
+  }
+  return pageTexts.join(' ');
+};
+
 app.post('/clean-pdf-json', async (req, res) => {
   try {
     const { url, apiKey } = req.body;
-
     if (!url) {
-      return res.status(400).json({ error: 'URL is required in the request body.' });
+      return res.status(400).json({ error: 'URL is required.' });
     }
     
     console.log('Fetching URL:', url);
-    
     const headers = apiKey ? { 'x-api-key': apiKey } : {};
     const response = await axios.get(url, { 
       headers,
@@ -38,69 +45,69 @@ app.post('/clean-pdf-json', async (req, res) => {
 
     const fullData = response.data;
     const originalSize = JSON.stringify(fullData).length;
-    
-    // Navigate to the array of pages in the nested structure.
     const pages = fullData.document?.page || [];
-    
     console.log(`Found ${pages.length} pages to process.`);
     
     if (!Array.isArray(pages) || pages.length === 0) {
-      return res.json({
-        error: 'No pages found in the document structure.',
-        data: { pages: [] },
-        originalSize: originalSize,
-        cleanedSize: 0,
-        savedCharacters: originalSize,
-        estimatedTokensSaved: Math.round(originalSize / 4)
-      });
+      return res.status(400).json({ error: 'No pages found in document.' });
     }
     
     const cleanedPagesContent = [];
     
+    // Define the data signatures for a critical page
+    const basinRegex = /B-[\w\d]+/g;
+    const acreageRegex = /\d+\.\d{2} ac\./g;
+    const MIN_MATCH_COUNT = 3; // Threshold to qualify a page as a drainage map
+
     for (const page of pages) {
-      const pageElements = [];
-      const rows = page.row || [];
+      const pageTextForScanning = getPageAsText(page);
 
-      if (Array.isArray(rows)) {
-        for (const row of rows) {
-          const columns = row.column || [];
-          if (Array.isArray(columns)) {
-            for (const column of columns) {
-              const textObj = column.text;
-              
-              // FINAL CORRECTION: Check if textObj is an object and has the '#text' property.
-              // This robustly handles cases where column.text is an empty string "" or null.
-              if (textObj && typeof textObj === 'object' && textObj['#text']) {
-                const textContent = String(textObj['#text']).trim();
-                
-                // The coordinates are attributes of the textObj.
-                const x = parseFloat(textObj['@x']);
-                const y = parseFloat(textObj['@y']);
-                const w = parseFloat(textObj['@width']);
-                const h = parseFloat(textObj['@height']);
+      // Heuristic Check: Does this page contain the data we need?
+      const basinMatches = pageTextForScanning.match(basinRegex);
+      const acreageMatches = pageTextForScanning.match(acreageRegex);
 
-                // Only add the element if we have valid text AND valid numerical coordinates.
-                if (textContent && !isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
-                  pageElements.push({
-                    text: textContent,
-                    bbox: [x, y, x + w, y + h] // Storing as [x1, y1, x2, y2]
-                  });
+      const isCriticalPage = 
+        (basinMatches && basinMatches.length >= MIN_MATCH_COUNT) &&
+        (acreageMatches && acreageMatches.length >= MIN_MATCH_COUNT);
+
+      if (isCriticalPage) {
+        console.log(`Page ${page['@index']}: Detected as a critical drainage map. Processing with details.`);
+        // DETAILED PROCESSING for critical pages
+        const pageElements = [];
+        const rows = page.row || [];
+        if (Array.isArray(rows)) {
+          for (const row of rows) {
+            const columns = row.column || [];
+            if (Array.isArray(columns)) {
+              for (const column of columns) {
+                const textObj = column.text;
+                if (textObj && typeof textObj === 'object' && textObj['#text']) {
+                  const textContent = String(textObj['#text']).trim();
+                  
+                  const x = parseFloat(parseFloat(textObj['@x']).toFixed(2));
+                  const y = parseFloat(parseFloat(textObj['@y']).toFixed(2));
+                  const w = parseFloat(parseFloat(textObj['@width']).toFixed(2));
+                  const h = parseFloat(parseFloat(textObj['@height']).toFixed(2));
+
+                  if (textContent && !isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
+                    pageElements.push({
+                      text: textContent,
+                      bbox: [x, y, x + w, y + h]
+                    });
+                  }
                 }
               }
             }
           }
         }
-      }
-      
-      if (pageElements.length > 0) {
-        cleanedPagesContent.push(pageElements);
+        cleanedPagesContent.push({ type: 'detailed', content: pageElements });
+      } else {
+        // SIMPLE PROCESSING for all other pages
+        cleanedPagesContent.push({ type: 'simple', content: pageTextForScanning });
       }
     }
     
-    const cleanedData = {
-      pages: cleanedPagesContent 
-    };
-
+    const cleanedData = { pages: cleanedPagesContent };
     const cleanedSize = JSON.stringify(cleanedData).length;
     const savedCharacters = originalSize - cleanedSize;
     
@@ -116,18 +123,10 @@ app.post('/clean-pdf-json', async (req, res) => {
     
   } catch (error) {
     console.error('An error occurred:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to process PDF JSON.', 
-      details: error.message, 
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
-    });
+    res.status(500).json({ error: 'Failed to process PDF JSON.', details: error.message });
   }
 });
 
-/**
- * @route GET /health
- * @desc A simple health check endpoint to confirm the server is running.
- */
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
