@@ -1,10 +1,23 @@
 const express = require('express');
-const axios =require('axios');
+const axios = require('axios');
 const app = express();
 
-// Increase the limit to handle very large JSON files from complex PDFs
+/**
+ * This server provides an endpoint to process a raw JSON output from a PDF extraction service.
+ * The primary goal is to clean and restructure the data for consumption by an AI model.
+ * It transforms the deeply nested JSON into a simplified structure that includes text content
+ * along with its spatial bounding box coordinates, which is essential for layout-aware analysis.
+ */
+
+// Increase the payload size limit to handle very large JSON files from complex PDFs.
 app.use(express.json({ limit: '500mb' }));
 
+/**
+ * @route POST /clean-pdf-json
+ * @desc Fetches a raw PDF JSON from a URL, cleans it, and returns a structured format with text and coordinates.
+ * @body {string} url - The URL of the raw JSON file to process.
+ * @body {string} [apiKey] - An optional API key to include in the request headers.
+ */
 app.post('/clean-pdf-json', async (req, res) => {
   try {
     const { url, apiKey } = req.body;
@@ -15,19 +28,19 @@ app.post('/clean-pdf-json', async (req, res) => {
     
     console.log('Fetching URL:', url);
     
-    // Fetch the JSON file from the provided URL
+    // Fetch the JSON file from the provided URL, handling potential API keys.
     const headers = apiKey ? { 'x-api-key': apiKey } : {};
     const response = await axios.get(url, { 
       headers,
-      responseType: 'json', // Ensure axios parses the JSON automatically
-      maxContentLength: Infinity,
+      responseType: 'json', // Ensure axios parses the JSON automatically.
+      maxContentLength: Infinity, // Allow for very large responses.
       maxBodyLength: Infinity
     });
 
     const fullData = response.data;
     const originalSize = JSON.stringify(fullData).length;
     
-    // Navigate to the array of pages in the nested structure
+    // Navigate to the array of pages in the nested structure. Adjust if your source JSON differs.
     const pages = fullData.document?.page || [];
     
     console.log(`Found ${pages.length} pages to process.`);
@@ -45,9 +58,10 @@ app.post('/clean-pdf-json', async (req, res) => {
     
     const cleanedPagesContent = [];
     
-    // Iterate through each page to extract and flatten text
+    // Iterate through each page to extract and structure text elements.
     for (const page of pages) {
-      const pageTexts = [];
+      // MODIFICATION: The array will now hold objects {text, bbox} instead of just strings.
+      const pageElements = [];
       const rows = page.row || [];
 
       if (Array.isArray(rows)) {
@@ -55,12 +69,24 @@ app.post('/clean-pdf-json', async (req, res) => {
           const columns = row.column || [];
           if (Array.isArray(columns)) {
             for (const column of columns) {
-              // The target text is nested inside column.text['#text']
               const textObj = column.text;
               if (textObj && typeof textObj === 'object' && textObj['#text']) {
-                const textContent = String(textObj['#text']).trim(); // Ensure it's a string and trim whitespace
-                if (textContent) {
-                  pageTexts.push(textContent);
+                const textContent = String(textObj['#text']).trim();
+                
+                // MODIFICATION: Check for and extract coordinates.
+                // The attribute keys ('@_x', '@_y', etc.) are common in XML-to-JSON conversions.
+                // **IMPORTANT**: Adjust these keys if your specific JSON uses a different format (e.g., "x", "y", "bbox").
+                const x = parseFloat(column['@_x']);
+                const y = parseFloat(column['@_y']);
+                const w = parseFloat(column['@_w']);
+                const h = parseFloat(column['@_h']);
+
+                // Only add the element if we have valid text AND valid numerical coordinates.
+                if (textContent && !isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
+                  pageElements.push({
+                    text: textContent,
+                    bbox: [x, y, x + w, y + h] // Storing as a standard [x1, y1, x2, y2] bounding box.
+                  });
                 }
               }
             }
@@ -68,13 +94,13 @@ app.post('/clean-pdf-json', async (req, res) => {
         }
       }
       
-      // Join all extracted text from a single page into one coherent string
-      if (pageTexts.length > 0) {
-        cleanedPagesContent.push(pageTexts.join(' '));
+      // MODIFICATION: Add the array of objects for the entire page.
+      if (pageElements.length > 0) {
+        cleanedPagesContent.push(pageElements);
       }
     }
     
-    // This is the new, simplified data structure for the AI
+    // This is the new, spatially-aware data structure for the AI.
     const cleanedData = {
       pages: cleanedPagesContent 
     };
@@ -94,7 +120,6 @@ app.post('/clean-pdf-json', async (req, res) => {
     
   } catch (error) {
     console.error('An error occurred:', error.message);
-    // Provide a more detailed error response for easier debugging
     res.status(500).json({ 
       error: 'Failed to process PDF JSON.', 
       details: error.message, 
@@ -103,7 +128,10 @@ app.post('/clean-pdf-json', async (req, res) => {
   }
 });
 
-// A simple health check endpoint
+/**
+ * @route GET /health
+ * @desc A simple health check endpoint to confirm the server is running.
+ */
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
