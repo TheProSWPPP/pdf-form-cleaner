@@ -28,7 +28,6 @@ app.post('/clean-pdf-json', async (req, res) => {
     
     console.log('Fetching URL:', url);
     
-    // Fetch the JSON file from the provided URL, handling potential API keys.
     const headers = apiKey ? { 'x-api-key': apiKey } : {};
     const response = await axios.get(url, { 
       headers,
@@ -69,17 +68,18 @@ app.post('/clean-pdf-json', async (req, res) => {
             for (const column of columns) {
               const textObj = column.text;
               
-              // Ensure textObj is an object and contains the '#text' property. This also filters out empty text nodes.
+              // FINAL CORRECTION: Check if textObj is an object and has the '#text' property.
+              // This robustly handles cases where column.text is an empty string "" or null.
               if (textObj && typeof textObj === 'object' && textObj['#text']) {
                 const textContent = String(textObj['#text']).trim();
                 
-                // CORRECTED: The coordinates are on the `textObj`, not the `column`.
-                // The attribute names are also corrected from `@_x` to `@x`, etc.
+                // The coordinates are attributes of the textObj.
                 const x = parseFloat(textObj['@x']);
                 const y = parseFloat(textObj['@y']);
                 const w = parseFloat(textObj['@width']);
                 const h = parseFloat(textObj['@height']);
 
+                // Only add the element if we have valid text AND valid numerical coordinates.
                 if (textContent && !isNaN(x) && !isNaN(y) && !isNaN(w) && !isNaN(h)) {
                   pageElements.push({
                     text: textContent,
@@ -97,7 +97,6 @@ app.post('/clean-pdf-json', async (req, res) => {
       }
     }
     
-    // This is the new, spatially-aware data structure for the AI.
     const cleanedData = {
       pages: cleanedPagesContent 
     };
